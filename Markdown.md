@@ -1,5 +1,6 @@
 # Язык разметки Markdown
-Markdown - удобный язык разметки, который конвертруется в HTML. Расширение .md или .mackdown
+#### Markdown - удобный язык разметки, который конвертруется в HTML. Расширение .md или .mackdown
+
 
 ##### Содержит базовые элементы
 - заголовок первого уровня
@@ -279,3 +280,55 @@ _	_	_
 #### В комментариях к вопросам поддерживается только минимальный набор правил разметки: жирный шрифт, курсив, строчный код в бэктиках и ссылки строчного формата.
 ## Мессенджеры
 #### Многие мессенджеры, например Telegram или Discord, используют упрощённую версию Markdown. Там отсутствует разметка заголовков, списков и цитат, но поддерживается расширенный синтаксис выделения текста: жирный шрифт, курсив, зачёркивания, ссылки, разметка исходного кода.
+
+
+# [Редакторы C#](https://github.com/topics/markdown-editor?l=c%23 "")
+
+# [Парсинг Markdown в .NET](https://habr.com/ru/companies/otus/articles/681662/)
+[MarkDig](https://github.com/lunet-io/markdig) - относительно новый, очень быстрый и имеет очень хороший задел в плане расширяемости, что позволяет нам создавать собственные расширения для Markdown.
+
+`Install-Package Markdig`
+
+```C#
+public static class Markdown
+{
+    public static string Parse(string markdown)
+    {
+        var pipeline = new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            .Build();
+        return Markdown.ToHtml(markdown, pipeline);
+    }
+}
+```
+Код, приведенный выше, будет работать, но он не очень эффективен, так как для каждой операции синтаксического анализа конвейер создается заново. В целях повышения производительности гораздо лучше будет создать небольшой уровень абстракции для парсера Markdown, чтобы его можно было кэшировать. Вы можете посмотреть код [MarkdownParserFactory](https://github.com/RickStrahl/Westwind.Web.Markdown/blob/master/Westwind.Web.Markdown/MarkdownParser/MarkdownParserFactory.cs) и настроенной реализации MarkdownParser на GitHub, где также можно найти интерфейс IMarkdownParser, содержащий метод .Parse(markdown), на основе которого в дальнейшем будет реализован рендеринг.
+
+Чтобы сделать этот функционал легкодоступным из любого места, мы обернем фабрику и функции парсинга статическим классом Markdown, как показано ниже:
+```C#
+public static class Markdown
+{
+    public static string Parse(string markdown, bool usePragmaLines = false, bool forceReload = false)
+    {
+        if (string.IsNullOrEmpty(markdown))
+            return "";
+
+        var parser = MarkdownParserFactory.GetParser(usePragmaLines, forceReload);
+        return parser.Parse(markdown);
+    }
+
+    public static HtmlString ParseHtmlString(string markdown, bool usePragmaLines = false, bool forceReload = false)
+    {
+        return new HtmlString(Parse(markdown, usePragmaLines, forceReload));
+    }
+}
+```
+Теперь, когда у нас есть этот класс, мы можем легко преобразовать Markdown в HTML. Чтобы распарсить Markdown в string прямо в коде нам достаточно использовать:
+```C#
+    string html = Markdown.Parse(markdownText)
+``` 
+Чтобы распарсить Markdown во встраиваемую в Razor HTML-строку, вы можете использовать метод .ParseHtmlString():
+```HTML
+    <div>
+    @Markdown.ParseHtmlString(Model.ProductInfoMarkdown)
+    </div>
+```    

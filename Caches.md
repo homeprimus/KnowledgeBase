@@ -1,0 +1,4 @@
+- Redis
+- Memcached
+- [Dragonfly](https://www.dragonflydb.io/)
+- [KeyDb](https://medium.com/@john_63123/redis-should-be-multi-threaded-e28319cab744)

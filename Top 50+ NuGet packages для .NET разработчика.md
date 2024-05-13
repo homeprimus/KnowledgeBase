@@ -245,6 +245,7 @@ Confluent.Kafka это .NET клиент для Apache Kafka, разработа
 Довольно мощьная либа, поддерживает как inmemory так и distributed кэш. Моя персональная рекомендация.
 Microsoft.Extensions.Caching
 
+### [Microsoft.Extensions.Caching](https://www.nuget.org/packages/Microsoft.Extensions.Caching.StackExchangeRedis) 
 Microsoft.Extensions.Caching включает в себя две основные реализации кэша: MemoryCache для кэширования в памяти и DistributedCache для распределенного кэширования. 
 ## Другое
 ### ⭐[MediatR](https://www.nuget.org/packages/MediatR)

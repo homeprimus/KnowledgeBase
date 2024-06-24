@@ -678,5 +678,856 @@ destination.Name.ShouldBe("name");
 destination.Description.ShouldBe("description");
 destination.Title.ShouldBe("title");
 ```
+Таким образом, это позволяет вам повторно использовать конфигурацию существующей карты для дочерних типов `InnerSource` и `OtherInnerSource` при сопоставлении родительских типов `Source` и `Destination`. Он работает аналогично отображению наследования, но использует композицию, а не наследование.
+
+Порядок параметров в вызове `IncludeMembers` имеет значение. При сопоставлении целевого элемента выигрывает первое совпадение, начиная с самого исходного объекта, а затем с включенными дочерними объектами в указанном вами порядке. Итак, в приведенном выше примере Имя сопоставляется с самим исходным объектом, а Описание — с `InnerSource`, поскольку это первое совпадение.
+
+Обратите внимание, что это сопоставление является статическим, оно происходит во время конфигурации, а не во время отображения, поэтому типы времени выполнения дочерних объектов не учитываются.
+
+Обратите внимание, что это сопоставление является статическим, оно происходит во время конфигурации, а не во время отображения, поэтому типы времени выполнения дочерних объектов не учитываются.
+
+``ForPath(destination => destination.IncludedMember, member => member.MapFrom(source => source))``
+
+и наоборот. Если это не то, что вам нужно, вы можете избежать `ReverseMap` (явно создать обратную карту) или переопределить настройки по умолчанию (используя Ignore или `IncludeMembers` без параметров соответственно).
+
+Подробности [смотрите в тестах](https://github.com/AutoMapper/AutoMapper/blob/master/src/UnitTests/IMappingExpression/IncludeMembers.cs).
 
 
+## Обратное сопоставление и разглаживание (Reverse Mapping and Unflattening)
+Начиная с версии 6.1.0, AutoMapper теперь поддерживает более широкую поддержку обратного сопоставления. Учитывая наши сущности:
+```c#
+public class Order {
+  public decimal Total { get; set; }
+  public Customer Customer { get; set; }
+}
+
+public class Customer {
+  public string Name { get; set; }
+}
+
+// Мы можем свести это в DTO:
+
+public class OrderDto {
+  public decimal Total { get; set; }
+  public string CustomerName { get; set; }
+}
+
+// Мы можем сопоставить оба направления, включая разглаживание:
+
+var configuration = new MapperConfiguration(cfg => {
+  cfg
+    .CreateMap<Order, OrderDto>()
+    .ReverseMap();
+});
+
+```
+Вызывая `ReverseMap`, `AutoMapper` создает конфигурацию обратного сопоставления, включающую разглаживание:
+```c#
+var customer = new Customer {
+  Name = "Bob"
+};
+
+var order = new Order {
+  Customer = customer,
+  Total = 15.8m
+};
+
+var orderDto = mapper.Map<Order, OrderDto>(order);
+
+orderDto.CustomerName = "Joe";
+
+mapper.Map(orderDto, order);
+
+order.Customer.Name.ShouldEqual("Joe");
+```
+Разглаживание настраивается только для `ReverseMap`. Если вы хотите выполнить разведение, вы должны настроить `Entity -> Dto`, а затем вызвать `ReverseMap`, чтобы создать конфигурацию карты типов разведения из `Dto -> Entity`.
+
+## Настройка обратного сопоставления (Customizing reverse mapping)
+`AutoMapper` автоматически перевернет сопоставление «Customer.Name» с «CustomerName» на основе исходного выравнивания. Если вы используете `MapFrom`, `AutoMapper` попытается перевернуть карту:
+
+```c#
+cfg.CreateMap<Order, OrderDto>()
+  .ForMember(d => d.CustomerName, opt => opt.MapFrom(src => src.Customer.Name))
+  .ReverseMap();
+```
+Пока путь `MapFrom` является средством доступа к членам, `AutoMapper` будет выполнять развертывание по тому же пути (CustomerName = Customer.Name).
+Если вам нужно настроить это, для обратной карты вы можете использовать `ForPath`:
+```c#
+cfg.CreateMap<Order, OrderDto>()
+  .ForMember(d => d.CustomerName, opt => opt.MapFrom(src => src.Customer.Name))
+  .ReverseMap()
+  .ForPath(s => s.Customer.Name, opt => opt.MapFrom(src => src.CustomerName));
+```
+В большинстве случаев вам это не понадобится, поскольку исходный `MapFrom` будет перевернут. Используйте `ForPath`, если пути для получения и установки значений различаются.
+
+Если вы не хотите, чтобы поведение было несглаживаемым, вы можете удалить вызов `ReverseMap` и создать две отдельные карты. Или вы можете использовать `Ignore`:
+
+```c#
+cfg.CreateMap<Order, OrderDto>()
+  .ForMember(d => d.CustomerName, opt => opt.MapFrom(src => src.Customer.Name))
+  .ReverseMap()
+  .ForPath(s => s.Customer.Name, opt => opt.Ignore());
+```
+
+## IncludeMembers
+`ReverseMap` также интегрируется с `IncludeMembers` и такими конфигурациями, как
+
+``ForMember(destination => destination.IncludedMember, member => member.MapFrom(source => source))``
+
+## Сопоставление наследования (Mapping Inheritance)
+Наследование сопоставления выполняет две функции:
+
+- Наследование конфигурации сопоставления из базового класса или конфигурации интерфейса.
+- Полиморфное отображение во время выполнения
+
+Наследование конфигурации базового класса является добровольным, и вы можете либо явно указать сопоставление для наследования от конфигурации базового типа с помощью `Include`, либо в конфигурации производного типа с помощью `IncludeBase`:
+```c#
+CreateMap<BaseEntity, BaseDto>()
+   .Include<DerivedEntity, DerivedDto>()
+   .ForMember(dest => dest.SomeMember, opt => opt.MapFrom(src => src.OtherMember));
+
+CreateMap<DerivedEntity, DerivedDto>();
+```
+or
+```c#
+CreateMap<BaseEntity, BaseDto>()
+   .ForMember(dest => dest.SomeMember, opt => opt.MapFrom(src => src.OtherMember));
+
+CreateMap<DerivedEntity, DerivedDto>()
+    .IncludeBase<BaseEntity, BaseDto>();
+```
+В каждом вышеописанном случае производное сопоставление наследует пользовательскую конфигурацию сопоставления из базовой карты.
+
+`Include/IncludeBase` применяется рекурсивно, поэтому вам нужно включить только ближайший уровень иерархии.
+
+Если для некоторого базового класса у вас есть много непосредственно производных классов, для удобства вы можете включить все производные карты из конфигурации карты базового типа:
+```c#
+CreateMap<BaseEntity, BaseDto>()
+    .IncludeAllDerived();
+
+CreateMap<DerivedEntity, DerivedDto>();
+```
+Обратите внимание, что при этом будут выполняться поиск производных типов во всех ваших сопоставлениях, и это будет медленнее, чем явное указание производных сопоставлений.
+
+## Полиморфизм времени выполнения (Runtime polymorphism)
+
+```c#
+public class Order { }
+public class OnlineOrder : Order { }
+public class MailOrder : Order { }
+
+public class OrderDto { }
+public class OnlineOrderDto : OrderDto { }
+public class MailOrderDto : OrderDto { }
+
+var configuration = new MapperConfiguration(cfg => {
+    cfg.CreateMap<Order, OrderDto>()
+        .Include<OnlineOrder, OnlineOrderDto>()
+        .Include<MailOrder, MailOrderDto>();
+    cfg.CreateMap<OnlineOrder, OnlineOrderDto>();
+    cfg.CreateMap<MailOrder, MailOrderDto>();
+});
+
+// Perform Mapping
+var order = new OnlineOrder();
+var mapped = mapper.Map(order, order.GetType(), typeof(OrderDto));
+Assert.IsType<OnlineOrderDto>(mapped);
+```
+Вы заметите, что, поскольку сопоставленный объект является `OnlineOrder`, `AutoMapper` увидел, что у вас есть более конкретное сопоставление для `OnlineOrder`, чем `OrderDto`, и автоматически выбрал его.
+
+## Указание наследования в производных классах (Specifying inheritance in derived classes)
+Вместо настройки наследования от базового класса вы можете указать наследование от производных классов:
+```c#
+var configuration = new MapperConfiguration(cfg => {
+  cfg.CreateMap<Order, OrderDto>()
+    .ForMember(o => o.Id, m => m.MapFrom(s => s.OrderId));
+  cfg.CreateMap<OnlineOrder, OnlineOrderDto>()
+    .IncludeBase<Order, OrderDto>();
+  cfg.CreateMap<MailOrder, MailOrderDto>()
+    .IncludeBase<Order, OrderDto>();
+});
+```
+
+## As
+В простых случаях вы можете использовать `As` для перенаправления базовой карты на существующую производную карту:
+```c#
+    cfg.CreateMap<Order, OnlineOrderDto>();
+    cfg.CreateMap<Order, OrderDto>().As<OnlineOrderDto>();
+    
+    mapper.Map<OrderDto>(new Order()).ShouldBeOfType<OnlineOrderDto>();
+```
+
+## Приоритеты сопоставления наследования (Inheritance Mapping Priorities)
+Это вносит дополнительную сложность, поскольку существует несколько способов сопоставления свойства. Приоритет этих источников следующий:
+
+- Явное сопоставление (с использованием `.MapFrom()`)
+- Унаследованное явное сопоставление
+- `Ignore` сопоставление свойств
+- Сопоставление соглашений (свойства, сопоставленные с помощью соглашения)
+
+Чтобы продемонстрировать это, давайте изменим наши классы, показанные выше.
+```c#
+//Domain Objects
+public class Order { }
+public class OnlineOrder : Order
+{
+    public string Referrer { get; set; }
+}
+public class MailOrder : Order { }
+
+//Dtos
+public class OrderDto
+{
+    public string Referrer { get; set; }
+}
+
+//Mappings
+var configuration = new MapperConfiguration(cfg => {
+    cfg.CreateMap<Order, OrderDto>()
+        .Include<OnlineOrder, OrderDto>()
+        .Include<MailOrder, OrderDto>()
+        .ForMember(o=>o.Referrer, m=>m.Ignore());
+    cfg.CreateMap<OnlineOrder, OrderDto>();
+    cfg.CreateMap<MailOrder, OrderDto>();
+});
+
+// Perform Mapping
+var order = new OnlineOrder { Referrer = "google" };
+var mapped = mapper.Map(order, order.GetType(), typeof(OrderDto));
+Assert.IsNull(mapped.Referrer);
+```
+Обратите внимание, что в нашей конфигурации сопоставления мы проигнорировали `Referrer` (поскольку он не существует в базовом классе заказа), и это имеет более высокий приоритет, чем сопоставление по соглашению, поэтому свойство не отображается.
+
+Если вы хотите, чтобы свойство `Referrer` отображалось в сопоставлении `OnlineOrder` с `OrderDto`, вам следует включить явное сопоставление в сопоставление следующим образом:
+```c#
+    cfg.CreateMap<OnlineOrder, OrderDto>()
+        .ForMember(o=>o.Referrer, m=>m.MapFrom(x=>x.Referrer));
+```        
+В целом эта функция должна сделать использование `AutoMapper` с классами, использующими наследование, более естественным.
+
+
+## Сопоставление атрибутов (Attribute Mapping)
+В дополнение к гибкой настройке есть возможность объявлять и настраивать карты с помощью атрибутов. Карты атрибутов могут дополнять или заменять конфигурацию плавного сопоставления.
+
+## Тип конфигурации карты
+Для поиска карт для настройки используйте метод `AddMaps`:
+```c#
+var configuration = new MapperConfiguration(cfg => cfg.AddMaps("MyAssembly"));
+var mapper = new Mapper(configuration);
+```
+`AddMaps` ищет свободную конфигурацию карт (классы профиля) и сопоставления на основе атрибутов.
+
+Чтобы объявить карту атрибутов, украсьте тип назначения `AutoMapAttribute`:
+```c#
+[AutoMap(typeof(Order))]
+public class OrderDto {
+    // destination members
+```
+Это эквивалентно конфигурации `CreateMap<Order, OrderDto>()`.    
+
+## Настройка конфигурации карты типов (Customizing type map configuration)
+Чтобы настроить общую конфигурацию карты типов, вы можете установить следующие свойства в `AutoMapAttribute`:
+-    ReverseMap (bool)
+-    ConstructUsingServiceLocator (bool)
+-    MaxDepth (int)
+-    PreserveReferences (bool)
+-    DisableCtorValidation (bool)
+-    IncludeAllDerived (bool)
+-    TypeConverter (Type)
+-    AsProxy (bool)
+Все они соответствуют аналогичным параметрам конфигурации плавного сопоставления. Для сопоставления требуется только значение `sourceType`.
+
+## Конфигурация участника (Member configuration)
+Для карт на основе атрибутов вы можете украсить отдельные элементы дополнительной конфигурацией. Поскольку атрибуты в C# имеют ограничения (например, нет выражений), доступные параметры конфигурации немного ограничены.
+
+Атрибуты на основе элементов объявляются в пространстве имен `AutoMapper.Configuration.Annotations`.
+
+Если конфигурация на основе атрибутов недоступна или не работает, вы можете объединить карты на основе атрибутов и карт на основе профилей (хотя это может сбить с толку).
+
+## Игнорирование участников (Ignoring members)
+Используйте `IgnoreAttribute`, чтобы игнорировать отдельный элемент назначения при сопоставлении и/или проверке.
+```c#
+using AutoMapper.Configuration.Annotations;
+
+[AutoMap(typeof(Order))]
+public class OrderDto {
+    [Ignore]
+    public decimal Total { get; set; }
+```
+
+## Перенаправление на другой исходный элемент (Redirecting to a different source member)
+Невозможно использовать `MapFrom` с выражением в атрибуте, но `SourceMemberAttribute` может перенаправить на отдельный именованный элемент:
+```c#
+using AutoMapper.Configuration.Annotations;
+
+[AutoMap(typeof(Order))]
+public class OrderDto {
+   [SourceMember("OrderTotal")]
+   public decimal Total { get; set; }
+```
+Или используйте оператор `nameof`:   
+```c#
+using AutoMapper.Configuration.Annotations;
+
+[AutoMap(typeof(Order))]
+public class OrderDto {
+   [SourceMember(nameof(Order.OrderTotal))]
+   public decimal Total { get; set; }
+```
+Вы не можете выполнить выравнивание с помощью этого атрибута, а только перенаправлять элементы исходного типа (т.е. в имени нет «Order.Customer.Office.Name»). Настройка сведения доступна только в конфигурации Fluent.
+
+## Дополнительные возможности конфигурации (Additional configuration options)
+Дополнительные параметры конфигурации на основе атрибутов включают в себя:
+-    MapAtRuntimeAttribute
+-    MappingOrderAttribute
+-    NullSubstituteAttribute
+-    UseExistingValueAttribute
+-    ValueConverterAttribute
+-    ValueResolverAttribute
+
+Каждый соответствует одному и тому же варианту отображения конфигурации.
+
+## Динамическое и расширенное сопоставление объектов (Dynamic and ExpandoObject Mapping)
+`AutoMapper` может сопоставлять динамические объекты и обратно без какой-либо явной настройки:
+```c#
+public class Foo {
+    public int Bar { get; set; }
+    public int Baz { get; set; }
+    public Foo InnerFoo { get; set; }
+}
+dynamic foo = new MyDynamicObject();
+foo.Bar = 5;
+foo.Baz = 6;
+
+var configuration = new MapperConfiguration(cfg => {});
+
+var result = mapper.Map<Foo>(foo);
+result.Bar.ShouldEqual(5);
+result.Baz.ShouldEqual(6);
+
+dynamic foo2 = mapper.Map<MyDynamicObject>(result);
+foo2.Bar.ShouldEqual(5);
+foo2.Baz.ShouldEqual(6);
+```
+Точно так же вы можете сопоставлять объекты прямо из `Dictionary<string, object>`, `AutoMapper` выровняет ключи с именами свойств. Для сопоставления с дочерними объектами назначения вы можете использовать точечную запись.
+
+```c#
+var result = mapper.Map<Foo>(new Dictionary<string, object> { ["InnerFoo.Bar"] = 42 });
+result.InnerFoo.Bar.ShouldEqual(42);
+```
+
+
+## Открытые дженерики (Open Generics)
+AutoMapper может поддерживать карту открытого универсального типа. Создайте карту для открытых универсальных типов:
+```c#
+public class Source<T> {
+    public T Value { get; set; }
+}
+
+public class Destination<T> {
+    public T Value { get; set; }
+}
+
+// Create the mapping
+var configuration = new MapperConfiguration(cfg => cfg.CreateMap(typeof(Source<>), typeof(Destination<>)));
+```
+Вам не нужно создавать карты для закрытых универсальных типов. `AutoMapper` применит любую конфигурацию от открытого универсального сопоставления к закрытому сопоставлению во время выполнения:
+```c#
+var source = new Source<int> { Value = 10 };
+
+var dest = mapper.Map<Source<int>, Destination<int>>(source);
+
+dest.Value.ShouldEqual(10);
+```
+Поскольку C# допускает только параметры закрытого универсального типа, вам необходимо использовать версию `CreateMap` `System.Type` для создания карт открытых универсальных типов. Отсюда вы можете использовать всю доступную конфигурацию сопоставления, и открытая универсальная конфигурация будет применена к карте закрытого типа во время выполнения. AutoMapper будет пропускать открытые карты универсальных типов во время проверки конфигурации, поскольку вы все равно можете создавать закрытые типы, которые не преобразуются, например `Source<Foo> -> Destination<Bar>`, где преобразование из Foo в Bar отсутствует.
+
+Вы также можете создать открытый преобразователь универсальных типов:
+```c#
+var configuration = new MapperConfiguration(cfg =>
+   cfg.CreateMap(typeof(Source<>), typeof(Destination<>)).ConvertUsing(typeof(Converter<>)));
+```
+AutoMapper также поддерживает преобразователи открытых универсальных типов с любым количеством универсальных аргументов:
+```c#
+var configuration = new MapperConfiguration(cfg =>
+   cfg.CreateMap(typeof(Source<>), typeof(Destination<>)).ConvertUsing(typeof(Converter<,>)));
+```
+Закрытый тип `Source` будет первым универсальным аргументом, а закрытый тип `Destination` будет вторым аргументом закрытия `Converter<,>`.
+
+Та же идея применима и к преобразователям значений. [Смотри тесты](https://github.com/AutoMapper/AutoMapper/blob/e8249d582d384ea3b72eec31408126a0b69619bc/src/UnitTests/OpenGenerics.cs#L11).
+
+
+## Запрашиваемые расширения (Queryable Extensions)
+При использовании ORM, такого как NHibernate или Entity Framework, со стандартными функциями `Mapper.Map` AutoMapper, вы можете заметить, что ORM будет запрашивать все поля всех объектов в графе, когда AutoMapper пытается сопоставить результаты с типом назначения.
+
+Если ваш ORM предоставляет `IQueryables`, вы можете использовать вспомогательные методы `QueryableExtensions` `AutoMapper` для решения этой ключевой проблемы.
+
+Используя Entity Framework в качестве примера, предположим, что у вас есть сущность `OrderLine`, связанная с сущностью `Item`. Если вы хотите сопоставить это с `OrderLineDTO` со свойством `Item’s` `Name`, стандартный вызов `Mapper.Map` приведет к тому, что Entity Framework запросит всю таблицу `OrderLine` и `Item`.
+
+Вместо этого используйте этот подход.
+
+Учитывая следующие сущности:
+```c#
+public class OrderLine
+{
+  public int Id { get; set; }
+  public int OrderId { get; set; }
+  public Item Item { get; set; }
+  public decimal Quantity { get; set; }
+}
+
+public class Item
+{
+  public int Id { get; set; }
+  public string Name { get; set; }
+}
+
+// И следующий DTO:
+
+public class OrderLineDTO
+{
+  public int Id { get; set; }
+  public int OrderId { get; set; }
+  public string Item { get; set; }
+  public decimal Quantity { get; set; }
+}
+```
+Вы можете использовать запрашиваемые расширения следующим образом:
+```c#
+var configuration = new MapperConfiguration(cfg =>
+    cfg.CreateProjection<OrderLine, OrderLineDTO>()
+    .ForMember(dto => dto.Item, conf => conf.MapFrom(ol => ol.Item.Name)));
+
+public List<OrderLineDTO> GetLinesForOrder(int orderId)
+{
+  using (var context = new orderEntities())
+  {
+    return context.OrderLines.Where(ol => ol.OrderId == orderId)
+             .ProjectTo<OrderLineDTO>(configuration).ToList();
+  }
+}
+```
+`.ProjectTo<OrderLineDTO>()`() сообщит механизму сопоставления `AutoMapper` выдать предложение выбора в `IQueryable`, которое сообщит платформе сущности, что ему нужно только запросить столбец `Name` таблицы `Item`, так же, как если бы вы вручную проецировали свой `IQueryable` в `OrderLineDTO` с помощью `Select`.
+
+
+## Ограничения поставщика запросов (Query Provider Limitations)
+`ProjectTo` должен быть последним вызовом в цепочке методов `LINQ`. ORM работают с сущностями, а не с DTO. Примените любую фильтрацию и сортировку к сущностям и, в качестве последнего шага, проецируйте их на DTO. Поставщики запросов очень сложны, и выполнение вызова `ProjectTo` последним гарантирует, что поставщик запросов будет работать настолько точно, насколько это было задумано, для построения действительных запросов к базовой цели запроса (SQL, Mongo QL и т.д.).
+
+Обратите внимание: чтобы эта функция работала, все преобразования типов должны быть явно обработаны в вашем сопоставлении. Например, вы не можете полагаться на переопределение `ToString()` класса `Item`, чтобы сообщить платформе сущностей о выборе только из столбца `Name`, и любые изменения типа данных, такие как `Double` на `Decimal`, также должны быть явно обработаны.
+
+
+## API экземпляра (The instance API)
+
+Начиная с версии 8.0 в IMapper есть аналогичные методы ProjectTo, которые кажутся более естественными при использовании IMapper с DI.
+
+
+## Предотвращение проблем с ленивой загрузкой/SELECT N+1 (Preventing lazy loading/SELECT N+1 problems)
+Поскольку проекция LINQ, созданная `AutoMapper`, преобразуется непосредственно в запрос SQL поставщиком запросов, сопоставление происходит на уровне SQL/ADO.NET, не затрагивая ваши сущности. Все данные оперативно извлекаются и загружаются в ваши DTO.
+
+Вложенные коллекции используют `Select` для проецирования дочерних DTO:
+```c#
+from i in db.Instructors
+orderby i.LastName
+select new InstructorIndexData.InstructorModel
+{
+    ID = i.ID,
+    FirstMidName = i.FirstMidName,
+    LastName = i.LastName,
+    HireDate = i.HireDate,
+    OfficeAssignmentLocation = i.OfficeAssignment.Location,
+    Courses = i.Courses.Select(c => new InstructorIndexData.InstructorCourseModel
+    {
+        CourseID = c.CourseID,
+        CourseTitle = c.Title
+    }).ToList()
+};
+```
+Это сопоставление через `AutoMapper` приведет к проблеме SELECT N+1, поскольку каждый дочерний курс будет запрашиваться по одному, если в вашем ORM не указано, что требуется немедленная выборка. При проецировании LINQ для вашего ORM не требуется никакой специальной настройки или спецификации. ORM использует проекцию LINQ для построения именно того SQL-запроса, который необходим.
+
+Это означает, что вам не нужно использовать явную активную загрузку (`Include`) с `ProjectTo`. Если вам нужно что-то вроде фильтрованного `Include`, добавьте фильтр на свою карту:
+
+`` CreateProjection<Entity, Dto>().ForMember(d => d.Collection, o => o.MapFrom(s => s.Collection.Where(i => ...));``
+
+
+## Пользовательская проекция (Custom projection)
+В случае, если имена членов не совпадают или вы хотите создать вычисляемое свойство, вы можете использовать `MapFrom` (перегрузку на основе выражений), чтобы предоставить собственное выражение для целевого элемента:
+```c#
+var configuration = new MapperConfiguration(cfg => cfg.CreateProjection<Customer, CustomerDto>()
+    .ForMember(d => d.FullName, opt => opt.MapFrom(c => c.FirstName + " " + c.LastName))
+    .ForMember(d => d.TotalContacts, opt => opt.MapFrom(c => c.Contacts.Count()));
+```
+`AutoMapper` передает предоставленное выражение вместе с построенной проекцией. Пока ваш поставщик запросов может интерпретировать предоставленное выражение, все будет передаваться в базу данных.
+
+Если выражение отклонено вашим поставщиком запросов (Entity Framework, NHibernate и т. д.), вам может потребоваться настроить выражение, пока не найдете то, которое будет принято.
+
+## Пользовательское преобразование типов (Custom Type Conversion)
+Иногда вам необходимо полностью заменить преобразование типа исходного типа в целевой. В обычном сопоставлении во время выполнения это достигается с помощью метода `ConvertUsing`. Чтобы выполнить аналог в проекции LINQ, используйте метод `ConvertUsing`:
+
+`` cfg.CreateProjection<Source, Dest>().ConvertUsing(src => new Dest { Value = 10 }); ``
+
+`ConvertUsing` на основе выражений немного более ограничен, чем перегрузки `ConvertUsing` на основе Func, поскольку будет работать только то, что разрешено в выражении, и базовый поставщик LINQ.
+
+
+## Конструкторы пользовательских типов назначения (Custom destination type constructors)
+Если у вашего целевого типа есть собственный конструктор, но вы не хотите переопределять все сопоставление, используйте перегрузку метода на основе выражения ConstructUsing:
+```c#
+cfg.CreateProjection<Source, Dest>()
+    .ConstructUsing(src => new Dest(src.Value + 10));
+```
+`AutoMapper` автоматически сопоставляет параметры конструктора назначения с исходными элементами на основе совпадающих имен, поэтому используйте этот метод только в том случае, если `AutoMapper` не может правильно сопоставить конструктор назначения или если вам требуется дополнительная настройка во время построения.
+
+
+## Преобразование строк (String conversion)
+`AutoMapper` автоматически добавит `ToString()`, если тип целевого элемента является строкой, а тип исходного элемента — нет.
+```c#
+public class Order {
+    public OrderTypeEnum OrderType { get; set; }
+}
+public class OrderDto {
+    public string OrderType { get; set; }
+}
+var orders = dbContext.Orders.ProjectTo<OrderDto>(configuration).ToList();
+orders[0].OrderType.ShouldEqual("Online");
+```
+
+
+## Явное расширение (Explicit expansion)
+В некоторых сценариях, таких как OData, общий DTO возвращается через действие контроллера `IQueryable`. Без явных инструкций AutoMapper расширит все элементы результата. Чтобы контролировать, какие элементы расширяются во время проецирования, установите `ExplicitExpansion` в конфигурации, а затем передайте элементы, которые вы хотите явно расширить:
+```c#
+dbContext.Orders.ProjectTo<OrderDto>(configuration,
+    dest => dest.Customer,
+    dest => dest.LineItems);
+// or string-based
+dbContext.Orders.ProjectTo<OrderDto>(configuration,
+    null,
+    "Customer",
+    "LineItems");
+// for collections
+dbContext.Orders.ProjectTo<OrderDto>(configuration,
+    null,
+    dest => dest.LineItems.Select(item => item.Product));
+```
+Более подробную информацию [смотрите в тестах](https://github.com/AutoMapper/AutoMapper/search?p=1&amp;q=ExplicitExpansion&amp;utf8=%E2%9C%93).    
+
+
+## Агрегация (Aggregations)
+LINQ может поддерживать агрегатные запросы, а `AutoMapper` поддерживает методы расширения LINQ. В примере пользовательской проекции, если мы переименовали свойство `TotalContacts` в `ContactsCount`, `AutoMapper` будет соответствовать методу расширения `Count()`, а поставщик LINQ преобразует счетчик в коррелированный подзапрос для агрегирования дочерних записей.
+
+`AutoMapper` также может поддерживать сложные агрегаты и вложенные ограничения, если это поддерживает поставщик LINQ:
+```c#
+cfg.CreateProjection<Course, CourseModel>()
+    .ForMember(m => m.EnrollmentsStartingWithA,
+          opt => opt.MapFrom(c => c.Enrollments.Where(e => e.Student.LastName.StartsWith("A")).Count()));
+```
+Этот запрос возвращает общее количество студентов для каждого курса, чья фамилия начинается с буквы «А».
+
+
+## Параметризация (Parameterization)
+Иногда для своих значений прогнозам требуются параметры времени выполнения. Рассмотрим проекцию, которая должна получить текущее имя пользователя как часть своих данных. Вместо использования кода пост-мэппинга мы можем параметризовать нашу конфигурацию MapFrom:
+```c#
+string currentUserName = null;
+cfg.CreateProjection<Course, CourseModel>()
+    .ForMember(m => m.CurrentUserName, opt => opt.MapFrom(src => currentUserName));
+```
+Когда мы проектируем, мы заменим наш параметр во время выполнения:
+```c#
+dbContext.Courses.ProjectTo<CourseModel>(Config, new { currentUserName = Request.User.Name });
+```
+Это работает путем захвата имени  поля замыкания в исходном выражении, а затем использования анонимного объекта/словаря для применения значения к значению параметра перед отправкой запроса поставщику запросов.
+
+Вы также можете использовать словарь для построения значений проекции:
+```c#
+dbContext.Courses.ProjectTo<CourseModel>(Config, new Dictionary<string, object> { {"currentUserName", Request.User.Name} });
+```
+Однако использование словаря приведет к тому, что в запросе будут жестко закодированные значения вместо параметризованного запроса, поэтому используйте его с осторожностью.
+
+
+## Рекурсивные модели (Recursive models)
+В идеале вам следует избегать моделей, которые ссылаются сами на себя (проведите небольшое исследование). Но если необходимо, вам нужно включить их:
+```c#
+configuration.Internal().RecursiveQueriesMaxDepth = someRandomNumber;
+```
+
+
+## Поддерживаемые параметры сопоставления (Supported mapping options)
+Не все параметры сопоставления поддерживаются, поскольку созданное выражение должно интерпретироваться поставщиком LINQ. AutoMapper поддерживает только то, что поддерживается поставщиками LINQ:
+-    MapFrom (Expression-based)
+-    ConvertUsing (Expression-based)
+-    Ignore
+-    NullSubstitute
+-    Value transformers
+-    IncludeMembers
+-    Runtime polymorphic mapping with Include/IncludeBase
+
+Не поддерживается:
+-    Condition
+-    SetMappingOrder
+-    UseDestinationValue
+-    MapFrom (Func-based)
+-    Before/AfterMap
+-    Custom resolvers
+-    Custom type converters
+-    ForPath
+-    Value converters
+-    Any calculated property on your domain object
+
+## Перевод выражений (UseAsDataSource) (Expression Translation)
+Automapper поддерживает перевод выражений из одного объекта в другой в отдельном пакете. Это делается путем замены свойств исходного класса на то, чему они соответствуют в целевом классе.
+
+Учитывая примеры классов:
+```c#
+public class OrderLine
+{
+  public int Id { get; set; }
+  public int OrderId { get; set; }
+  public Item Item { get; set; }
+  public decimal Quantity { get; set; }
+}
+
+public class Item
+{
+  public int Id { get; set; }
+  public string Name { get; set; }
+}
+
+public class OrderLineDTO
+{
+  public int Id { get; set; }
+  public int OrderId { get; set; }
+  public string Item { get; set; }
+  public decimal Quantity { get; set; }
+}
+
+var configuration = new MapperConfiguration(cfg =>
+{
+  cfg.AddExpressionMapping();
+  
+  cfg.CreateMap<OrderLine, OrderLineDTO>()
+    .ForMember(dto => dto.Item, conf => conf.MapFrom(ol => ol.Item.Name));
+  cfg.CreateMap<OrderLineDTO, OrderLine>()
+    .ForMember(ol => ol.Item, conf => conf.MapFrom(dto => dto));
+  cfg.CreateMap<OrderLineDTO, Item>()
+    .ForMember(i => i.Name, conf => conf.MapFrom(dto => dto.Item));
+});
+```
+При сопоставлении из выражения DTO
+```c#
+Expression<Func<OrderLineDTO, bool>> dtoExpression = dto=> dto.Item.StartsWith("A");
+var expression = mapper.Map<Expression<Func<OrderLine, bool>>>(dtoExpression);
+```
+Выражение будет переведено в ``ol => ol.Item.Name.StartsWith("A")``
+Automapper знает, что `dto.Item` сопоставлен с `ol.Item.Name`, поэтому заменил его на выражение.
+
+Перевод выражений также может работать с выражениями коллекций.
+
+```c#
+Expression<Func<IQueryable<OrderLineDTO>,IQueryable<OrderLineDTO>>> dtoExpression = dtos => dtos.Where(dto => dto.Quantity > 5).OrderBy(dto => dto.Quantity);
+var expression = mapper.Map<Expression<Func<IQueryable<OrderLine>,IQueryable<OrderLine>>>(dtoExpression);
+```
+В результате чего ``ols => ols.Where(ol => ol.Quantity > 5).OrderBy(ol => ol.Quantity)``
+
+
+## Сопоставление сведенных свойств со свойствами навигации (Mapping Flattened Properties to Navigation Properties)
+AutoMapper также поддерживает сопоставление сглаженных свойств (TMode или DTO) в выражениях с соответствующими свойствами навигации (TData) (когда свойство навигации было удалено из модели представления или DTO), например CourseModel.DepartmentName из выражения модели становится Course.Department в выражении данных.
+
+Возьмите следующий набор:
+```c#
+public class CourseModel
+{
+    public int CourseID { get; set; }
+
+    public int DepartmentID { get; set; }
+    public string DepartmentName { get; set; }
+}
+public class Course
+{
+    public int CourseID { get; set; }
+
+    public int DepartmentID { get; set; }
+    public Department Department { get; set; }
+}
+
+public class Department
+{
+    public int DepartmentID { get; set; }
+    public string Name { get; set; }
+}
+```
+Затем сопоставьте exp ниже с expMapped.
+```c#
+Expression<Func<IQueryable<CourseModel>, IIncludableQueryable<CourseModel, object>>> exp = i => i.Include(s => s.DepartmentName);
+Expression<Func<IQueryable<Course>, IIncludableQueryable<Course, object>>> expMapped = mapper.MapExpressionAsInclude<Expression<Func<IQueryable<Course>, IIncludableQueryable<Course, object>>>>(exp);
+```
+Результирующее сопоставленное выражение (expMapped.ToString()) имеет вид `i => i.Include(s => s.Department); `. Эта функция позволяет определять свойства навигации для запроса только на основе модели представления.
+
+
+## Поддерживаемые параметры сопоставления (Supported Mapping options)
+Подобно тому, как расширения Queryable Extensions могут поддерживать только определенные вещи, которые поддерживают поставщики LINQ, перевод выражений следует тем же правилам, что и то, что он может и не может поддерживать.
+
+## UseAsDataSource
+Сопоставление выражений друг с другом является утомительным занятием и приводит к созданию длинного и некрасивого кода.
+
+`UseAsDataSource().For<DTO>()` делает этот перевод чистым, поскольку не требуется явно отображать выражения. Он также вызывает для вас `ProjectTo<TDO>()`, где это применимо.
+
+Использование EntityFramework в качестве примера
+```c#
+dataContext.OrderLines.UseAsDataSource().For<OrderLineDTO>().Where(dto => dto.Name.StartsWith("A"))
+```
+Имеет эквивалент
+```c#
+dataContext.OrderLines.Where(ol => ol.Item.Name.StartsWith("A")).ProjectTo<OrderLineDTO>()
+```
+
+
+## Когда ProjectTo() не вызывается (When ProjectTo() is not called)
+Перевод выражений работает для всех видов функций, включая вызовы `Select`. Если `Select` используется после `UseAsDataSource()` и меняет тип возвращаемого значения, то `ProjectTo()` не будет вызываться, а вместо него будет использоваться `Mapper.Map`.
+
+Пример:
+
+`dataContext.OrderLines.UseAsDataSource().For<OrderLineDTO>().Select(dto => dto.Name)`
+
+Имеет эквивалент
+
+`dataContext.OrderLines.Select(ol => ol.Item.Name)`
+
+## Зарегистрируйте обратный вызов при перечислении запроса UseAsDataSource(). (Register a callback, for when an UseAsDataSource() query is enumerated)
+Иногда вам может потребоваться отредактировать коллекцию, возвращаемую сопоставленным запросом, прежде чем пересылать ее на следующий уровень приложения. С `.ProjectTo<TDto>` это довольно просто, поскольку нет смысла напрямую возвращать полученный `IQueryable<TDto>`, поскольку редактировать его все равно уже нельзя. Итак, вы, скорее всего, сделаете это:
+```c#
+var configuration = new MapperConfiguration(cfg =>
+    cfg.CreateMap<OrderLine, OrderLineDTO>()
+    .ForMember(dto => dto.Item, conf => conf.MapFrom(ol => ol.Item.Name)));
+
+public List<OrderLineDTO> GetLinesForOrder(int orderId)
+{
+  using (var context = new orderEntities())
+  {
+    var dtos = context.OrderLines.Where(ol => ol.OrderId == orderId)
+             .ProjectTo<OrderLineDTO>().ToList();
+    foreach(var dto in dtos)
+    {
+        // редактируем какое-либо свойство или загружаем дополнительные данные из базы данных и дополняем dtos
+    }
+    return dtos;
+  }
+}
+```
+Однако если вы сделаете это с помощью подхода `.UseAsDataSource()`, вы потеряете всю его мощь, а именно возможность изменять внутреннее выражение до тех пор, пока оно не будет перечислено. Чтобы решить эту проблему, мы ввели обратный вызов `.OnEnumerated`. Используя его, вы можете сделать следующее:
+```c#
+var configuration = new MapperConfiguration(cfg =>
+    cfg.CreateMap<OrderLine, OrderLineDTO>()
+    .ForMember(dto => dto.Item, conf => conf.MapFrom(ol => ol.Item.Name)));
+
+public IQueryable<OrderLineDTO> GetLinesForOrder(int orderId)
+{
+  using (var context = new orderEntities())
+  {
+    return context.OrderLines.Where(ol => ol.OrderId == orderId)
+             .UseAsDataSource()
+             .For<OrderLineDTO>()
+             .OnEnumerated((dtos) =>
+             {
+                foreach(var dto in dtosCast<OrderLineDTO>())
+                {
+                     // отредактируйте какое-либо свойство или загрузите дополнительные данные из базы данных и дополните dtos
+                }
+             }
+   }
+}
+```
+этот обратный вызов `OnEnumerated(IEnumerable)` выполняется при перечислении самого `IQueryable<OrderLineDTO>`. Таким образом, это также работает с примерами OData, упомянутыми выше: выражения OData $filter и $orderby по-прежнему преобразуются в SQL, а обратный вызов `OnEnumerated()` предоставляется с отфильтрованным упорядоченным набором результатов из базы данных.
+
+
+## (AutoMapper.Extensions.EnumMapping)
+Встроенный преобразователь перечислений не настраивается, его можно только заменить. В качестве альтернативы AutoMapper поддерживает сопоставление значений перечисления на основе соглашений в отдельном пакете [AutoMapper.Extensions.EnumMapping](https://www.nuget.org/packages/AutoMapper.Extensions.EnumMapping/).
+
+Для метода `CreateMap` эта библиотека предоставляет метод `ConvertUsingEnumMapping`. Этот метод добавляет все сопоставления по умолчанию от источника к значениям перечисления назначения.
+
+Если вы хотите изменить некоторые сопоставления, вы можете использовать метод `MapValue`. Это цепной метод.
+
+По умолчанию значения перечисления сопоставляются по значению (явно: `MapByValue()`), но можно сопоставлять по имени, вызывая `MapByName()`.
+```c#
+using AutoMapper.Extensions.EnumMapping;
+
+public enum Source
+{
+    Default = 0,
+    First = 1,
+    Second = 2
+}
+
+public enum Destination
+{
+    Default = 0,
+    Second = 2
+}
+
+internal class YourProfile : Profile
+{
+    public YourProfile()
+    {
+        CreateMap<Source, Destination>()
+            .ConvertUsingEnumMapping(opt => opt
+		        // optional: .MapByValue() or MapByName(), without configuration MapByValue is used
+		        .MapValue(Source.First, Destination.Default)
+            )
+            .ReverseMap(); // to support Destination to Source mapping, including custom mappings of ConvertUsingEnumMapping
+    }
+}
+    ...
+```
+
+## Соглашение по умолчанию (Default Convention)
+Пакет `AutoMapper.Extensions.EnumMapping` сопоставит все значения из типа источника в тип назначения, если оба типа перечисления имеют одинаковое значение (или по имени, или по значению). Все значения перечисления Source, которые не имеют эквивалента Target, вызовут исключение, если включена `EnumMappingValidation`.
+
+
+## Соглашение ReverseMap (ReverseMap Convention)
+Для метода `ReverseMap` используется то же соглашение, что и для сопоставлений по умолчанию, но оно также учитывает переопределение сопоставлений значений перечисления, если это возможно.
+
+Следующие шаги определяют обратные переопределения:
+
+1. Создайте сопоставления Source и Destination (соглашение по умолчанию), включая пользовательские переопределения.
+
+2. Создание сопоставлений для Destination и Source (соглашение по умолчанию) без пользовательских переопределений (должно быть определено)
+
+3. Сопоставления из шага 1 будут использоваться для определения переопределений для ReverseMap. Поэтому сопоставления группируются по значению назначения.
+
+    3a) если значение Source соответствует значению Destination, то это сопоставление является предпочтительным и переопределение не требуется.
+
+Возможно, что значение Destination имеет несколько значений Source, заданных сопоставлениями переопределения.
+
+Мы должны определить, какое значение источника будет новым назначением для текущего значения назначения (которое является новым значением источника).
+
+Для каждого значения источника на сгруппированное значение назначения:
+
+    3b) если значение перечисления Source не существует в типе перечисления Destination, то это сопоставление не может быть отменено.
+
+    3c) если существует значение Source, которое не является частью Destination сопоставлений из шага 1, то это сопоставление не может быть отменено.
+
+    3d) если значение Source не исключено опциями b и c, то это значение Source является новым значением Destination.
+
+4. Все переопределения, определенные на шаге 3, будут применены к сопоставлениям, полученным на шаге 2.
+
+5. Наконец, будут применены пользовательские сопоставления, предоставленные методу ReverseMap.
+
+## Тестирование (Testing)
+AutoMapper предоставляет хороший инструмент для проверки карт типов. Этот пакет добавляет дополнительный метод расширения `EnumMapperConfigurationExpressionExtensions.EnableEnumMappingValidation`, который расширяет существующий метод `AssertConfigurationIsValid()` и позволяет также проверять сопоставления перечислений.
+
+Чтобы включить тестирование конфигурации сопоставления перечислений:
+```c#
+public class MappingConfigurationsTests
+{
+    [Fact]
+    public void WhenProfilesAreConfigured_ItShouldNotThrowException()
+    {
+        // Arrange
+        var config = new MapperConfiguration(configuration =>
+        {
+            configuration.EnableEnumMappingValidation();
+
+            configuration.AddMaps(typeof(AssemblyInfo).GetTypeInfo().Assembly);
+        });
+		
+        // Assert
+        config.AssertConfigurationIsValid();
+    }
+}
+```

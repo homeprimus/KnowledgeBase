@@ -1,0 +1,1 @@
+ConcurrentBag<T> — это универсальный тип коллекции в пространстве имен `System.Collection.Generic`, который представляет неупорядоченную коллекцию объектов. Он реализует интерфейс `IProducerConsumerCollection<T>`.
